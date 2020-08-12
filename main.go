@@ -4,6 +4,8 @@ import (
     "log"
     "os"
     "fmt"
+    "strings"
+    "net/url"
     "encoding/json"
     "strconv"
     "time"
@@ -28,19 +30,45 @@ func isConnectedToInternet() bool {
     return stats.PacketsRecv > 0
 }
 
-func testWebsite(websiteUrl string) bool {
-    resp, err := http.Get(websiteUrl)
-    if err != nil {
-        return false
+func testWebsite(websiteUrl string, requestTimeout time.Duration, maxRetry int, retryTimeout time.Duration) bool {
+    client := &http.Client{
+        Timeout: time.Second * requestTimeout,
     }
-    defer resp.Body.Close()
 
-    return resp.StatusCode < 400
+    success := false
+    retry := 0
+
+    for !success && retry < maxRetry {
+        req, _ := http.NewRequest("GET", websiteUrl, nil)
+        resp, err := client.Do(req)
+        if err != nil {
+            return false
+        }
+        defer resp.Body.Close()
+        
+        success = resp.StatusCode < 400
+
+        if !success {
+            retry += 1
+            log.Printf("Check of %s failed. Retry %d of %d", websiteUrl, retry, maxRetry)
+            time.Sleep(retryTimeout * time.Second)
+        }
+    }
+
+    return success
+}
+
+func websiteURLToAlias(websiteUrl string) string {
+    u, err := url.Parse(websiteUrl)
+    if err != nil {
+        log.Fatalln(err)
+    }
+    return strings.ReplaceAll(u.Host, ".", "-")
 }
 
 func alertOpsGenie(websiteUrl string, apiKey string) {
     message := fmt.Sprintf("%s is not responding", websiteUrl)
-    values := map[string]string{"message": message, "priority": "P1"}
+    values := map[string]string{"message": message, "priority": "P1", "alias": websiteURLToAlias(websiteUrl) }
     jsonValue, _ := json.Marshal(values)
     
     client := &http.Client{}
@@ -76,15 +104,44 @@ func main() {
     if err != nil {
         log.Fatalln("SLEEP is not valid int. Quitting...")
     }
-    
 
+    timeoutString, haveValue := os.LookupEnv("TIMEOUT")
+    if !haveValue {
+        log.Fatalln("No TIMEOUT env variable. Quitting...")
+    }
+    
+    timeout, err := strconv.Atoi(timeoutString)
+    if err != nil {
+        log.Fatalln("TIMEOUT is not valid int. Quitting...")
+    }
+    
+    retryString, haveValue := os.LookupEnv("RETRY")
+    if !haveValue {
+        log.Fatalln("No RETRY env variable. Quitting...")
+    }
+    
+    retry, err := strconv.Atoi(retryString)
+    if err != nil {
+        log.Fatalln("RETRY is not valid int. Quitting...")
+    }
+
+    retryTimeoutString, haveValue := os.LookupEnv("RETRY_TIMEOUT")
+    if !haveValue {
+        log.Fatalln("No RETRY_TIMEOUT env variable. Quitting...")
+    }
+    
+    retryTimeout, err := strconv.Atoi(retryTimeoutString)
+    if err != nil {
+        log.Fatalln("RETRY_TIMEOUT is not valid int. Quitting...")
+    }
+    
     for {
         isConnectedToInternet := isConnectedToInternet()
         if !isConnectedToInternet {
             log.Fatalln("Cannot connect to internet. Quitting...")
         }
 
-        isUp := testWebsite(websiteUrl)
+        isUp := testWebsite(websiteUrl, time.Duration(timeout), retry, time.Duration(retryTimeout))
 
         if isUp {
             log.Printf("%s is up", websiteUrl)
