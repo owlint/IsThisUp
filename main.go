@@ -41,12 +41,14 @@ func testWebsite(websiteUrl string, requestTimeout time.Duration, maxRetry int, 
     for !success && retry < maxRetry {
         req, _ := http.NewRequest("GET", websiteUrl, nil)
         resp, err := client.Do(req)
-        if err != nil {
-            return false
-        }
-        defer resp.Body.Close()
         
-        success = resp.StatusCode < 400
+        if err != nil {
+            log.Printf("Error performing request : %v", err)
+        } else {
+            success = resp.StatusCode < 400
+        } 
+        
+        defer resp.Body.Close()
 
         if !success {
             retry += 1
