@@ -84,15 +84,16 @@ func alertPager(websiteUrl string, apiKey string) {
 	jsonValue, _ := json.Marshal(values)
 
 	client := &http.Client{}
-	req, _ := http.NewRequest("POST", "https://events.pagerduty.com/v2/enqueue", bytes.NewBuffer(jsonValue))
+	req, errreq := http.NewRequest("POST", "https://events.pagerduty.com/v2/enqueue", bytes.NewBuffer(jsonValue))
 	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
-	defer resp.Body.Close()
 
-	if err != nil || resp.StatusCode > 400 {
+	if err != nil || errreq != nil || resp.StatusCode > 400 {
 		log.Fatalln("Cannot alert with PagerDuty. Quitting...")
 	}
+
+	defer resp.Body.Close()
 }
 
 func alertOpsGenie(websiteUrl string, apiKey string) {
@@ -101,16 +102,17 @@ func alertOpsGenie(websiteUrl string, apiKey string) {
 	jsonValue, _ := json.Marshal(values)
 
 	client := &http.Client{}
-	req, _ := http.NewRequest("POST", "https://api.eu.opsgenie.com/v2/alerts", bytes.NewBuffer(jsonValue))
+	req, errreq := http.NewRequest("POST", "https://api.eu.opsgenie.com/v2/alerts", bytes.NewBuffer(jsonValue))
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", fmt.Sprintf("GenieKey %s", apiKey))
 
 	resp, err := client.Do(req)
-	defer resp.Body.Close()
 
-	if err != nil || resp.StatusCode > 400 {
+	if err != nil || errreq != nil || resp.StatusCode > 400 {
 		log.Fatalln("Cannot alert with OpsGenie. Quitting...")
 	}
+
+	defer resp.Body.Close()
 }
 
 func main() {
@@ -119,13 +121,13 @@ func main() {
 		log.Fatalln("No URL env variable. Quitting...")
 	}
 
-	plateforme, haveValue := os.LookupEnv("PLATEFORME")
+	plateform, haveValue := os.LookupEnv("PLATEFORM")
 	if !haveValue {
-		log.Fatalln("No PLATEFORME env variable. Quitting...")
+		log.Fatalln("No PLATEFORM env variable. Quitting...")
 	}
 
-	if plateforme != "pagerduty" && plateforme != "opsgenie" {
-		log.Fatalln("Invalid PLATEFORME. Quitting...")
+	if plateform != "pagerduty" && plateform != "opsgenie" {
+		log.Fatalln("Invalid PLATEFORM. Quitting...")
 	}
 
 	apiKey, haveValue := os.LookupEnv("API_KEY")
@@ -188,7 +190,7 @@ func main() {
 		}
 
 		if !isUp && isConnectedToInternet {
-			switch plateforme {
+			switch plateform {
 			case "pagerduty":
 				alertPager(websiteUrl, apiKey)
 			case "opsgenie":
