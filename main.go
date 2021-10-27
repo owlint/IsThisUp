@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -31,7 +32,34 @@ func isConnectedToInternet() bool {
 	return stats.PacketsRecv > 0
 }
 
-func testWebsite(websiteUrl string, requestTimeout time.Duration, maxRetry int, retryTimeout time.Duration) bool {
+func testSSLCert(websiteUrl string, validDays int) (bool, string) {
+	u, err := url.Parse(websiteUrl)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	conn, err := tls.Dial("tcp", u.Host+":443", nil)
+	if err != nil {
+		return false, "Server doesn't support SSL certificate err: " + err.Error()
+	}
+
+	err = conn.VerifyHostname(u.Host)
+	if err != nil {
+		return false, "Hostname doesn't match with certificate: " + err.Error()
+	}
+	expiry := conn.ConnectionState().PeerCertificates[0].NotAfter
+
+	dateCheck := time.Now()
+	dateCheck = dateCheck.Add(time.Hour * 24 * time.Duration(validDays))
+
+	if expiry.Before(dateCheck) {
+		return false, "Certificate expire in less than " + string(rune(validDays)) + " days"
+	}
+
+	return true, "ok"
+}
+
+func testWebsite(websiteUrl string, requestTimeout time.Duration, maxRetry int, retryTimeout time.Duration, validDays int) bool {
 	client := &http.Client{
 		Timeout: time.Second * requestTimeout,
 	}
@@ -40,6 +68,17 @@ func testWebsite(websiteUrl string, requestTimeout time.Duration, maxRetry int, 
 	retry := 0
 
 	for !success && retry < maxRetry {
+		if strings.HasPrefix(websiteUrl, "https://") {
+			ok, message := testSSLCert(websiteUrl, validDays)
+			if !ok {
+				retry += 1
+				log.Printf("SSL check of %s failed. Retry %d of %d", websiteUrl, retry, maxRetry)
+				log.Printf(message)
+				time.Sleep(retryTimeout * time.Second)
+				continue
+			}
+		}
+
 		req, _ := http.NewRequest("GET", websiteUrl, nil)
 		resp, err := client.Do(req)
 
@@ -175,13 +214,23 @@ func main() {
 		log.Fatalln("RETRY_TIMEOUT is not valid int. Quitting...")
 	}
 
+	validDaysString, haveValue := os.LookupEnv("SSL_DAYS_LIMIT")
+	if !haveValue {
+		log.Fatalln("No SSL_DAYS_LIMIT env variable. Quitting...")
+	}
+
+	validDays, err := strconv.Atoi(validDaysString)
+	if err != nil {
+		log.Fatalln("SSL_DAYS_LIMIT is not valid int. Quitting...")
+	}
+
 	for {
 		isConnectedToInternet := isConnectedToInternet()
 		if !isConnectedToInternet {
 			log.Fatalln("Cannot connect to internet. Quitting...")
 		}
 
-		isUp := testWebsite(websiteUrl, time.Duration(timeout), retry, time.Duration(retryTimeout))
+		isUp := testWebsite(websiteUrl, time.Duration(timeout), retry, time.Duration(retryTimeout), validDays)
 
 		if isUp {
 			log.Printf("%s is up", websiteUrl)
