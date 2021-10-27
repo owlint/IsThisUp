@@ -32,10 +32,10 @@ func isConnectedToInternet() bool {
 	return stats.PacketsRecv > 0
 }
 
-func testSSLCert(websiteUrl string, validDays int) (bool, string) {
+func testSSLCert(websiteUrl string, validDays time.Duration) (bool, string) {
 	u, err := url.Parse(websiteUrl)
 	if err != nil {
-		log.Fatalln(err)
+		return false, "Unable to parse site url"
 	}
 
 	conn, err := tls.Dial("tcp", u.Host+":443", nil)
@@ -50,10 +50,10 @@ func testSSLCert(websiteUrl string, validDays int) (bool, string) {
 	expiry := conn.ConnectionState().PeerCertificates[0].NotAfter
 
 	dateCheck := time.Now()
-	dateCheck = dateCheck.Add(time.Hour * 24 * time.Duration(validDays))
+	dateCheck = dateCheck.Add(validDays)
 
 	if expiry.Before(dateCheck) {
-		return false, "Certificate expire in less than " + string(rune(validDays)) + " days"
+		return false, "Certificate expire too soon"
 	}
 
 	return true, "ok"
@@ -69,7 +69,7 @@ func testWebsite(websiteUrl string, requestTimeout time.Duration, maxRetry int, 
 
 	for !success && retry < maxRetry {
 		if strings.HasPrefix(websiteUrl, "https://") {
-			ok, message := testSSLCert(websiteUrl, validDays)
+			ok, message := testSSLCert(websiteUrl, time.Hour*24*time.Duration(validDays))
 			if !ok {
 				retry += 1
 				log.Printf("SSL check of %s failed. Retry %d of %d", websiteUrl, retry, maxRetry)
